@@ -114,14 +114,29 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
 
+  /* USER CODE BEGIN 2 */
+	uart_hal_buffer_init();
+	setvbuf( stdout, NULL, _IONBF, 0 );
+	printf( "\n\rSTM32F401RE HAL_UART TEST!\n\r" );
+	HAL_UART_Receive_IT( &huart2, &uart_hal_rx.dummy, 1 );
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t	tickstart = HAL_GetTick();
+  uint32_t	ticknow;
+  uint32_t	t = 0;
   while (1)
   {
+  	ticknow	= HAL_GetTick();
+  	if( ( ticknow - tickstart ) > 100 )
+  	{
+  		tickstart = ticknow;
+  		printf( "Count : %lu \n\r", t++ );
+  	}
+
+  	uart_hal_rx_monitor();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

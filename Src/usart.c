@@ -39,9 +39,11 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usart.h"
+#include "string.h"
 
 /* USER CODE BEGIN 0 */
-
+uart_hal_tx_type	uart_hal_tx;
+uart_hal_rx_type	uart_hal_rx;
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart2;
@@ -112,24 +114,21 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
   
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOD_CLK_ENABLE();
-    /**USART2 GPIO Configuration    
-    PA3     ------> USART2_RX
-    PD5     ------> USART2_TX 
+    /**USART2 GPIO Configuration
+    PD5     ------> USART2_TX
+    PD6     ------> USART2_RX
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = GPIO_PIN_5;
+    GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_6;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+    /* USART3 interrupt Init */
+    HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(USART2_IRQn);
   /* USER CODE BEGIN USART2_MspInit 1 */
 
   /* USER CODE END USART2_MspInit 1 */
@@ -179,6 +178,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
     HAL_GPIO_DeInit(GPIOD, GPIO_PIN_5);
 
+	/* USART3 interrupt Deinit */
+	HAL_NVIC_DisableIRQ(USART2_IRQn);
   /* USER CODE BEGIN USART2_MspDeInit 1 */
 
   /* USER CODE END USART2_MspDeInit 1 */
@@ -204,7 +205,131 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 } 
 
 /* USER CODE BEGIN 1 */
+/*********************************************************************/
+/***   Init   ********************************************************/
+/*********************************************************************/
+void uart_hal_buffer_init( void )
+{
+	uart_hal_tx.input_p		= 0;
+	uart_hal_tx.output_p	= 0;
 
+	uart_hal_rx.input_p		= 0;
+	uart_hal_rx.output_p	= 0;
+}
+
+/*********************************************************************/
+/***   TX   **********************************************************/
+/*********************************************************************/
+void uart_hal_putchar( uint8_t *data, int len )
+{
+	uint16_t	size = len;
+
+	if( ( uart_hal_tx.input_p + len ) >= UART_TX_BUFFER_SIZE )
+	{
+		size	= UART_TX_BUFFER_SIZE - uart_hal_tx.input_p;
+		memcpy( &uart_hal_tx.buffer[uart_hal_tx.input_p], data, size );
+		memcpy( &uart_hal_tx.buffer[0], &data[size], len - size );
+		uart_hal_tx.input_p = len - size;
+	}
+	else
+	{
+		memcpy( &uart_hal_tx.buffer[uart_hal_tx.input_p], data, size );
+		uart_hal_tx.input_p += size;
+	}
+
+	HAL_UART_Transmit_IT( &huart2, &uart_hal_tx.buffer[uart_hal_tx.output_p], size );
+}
+
+void HAL_UART_TxCpltCallback( UART_HandleTypeDef *huart )
+{
+	uint16_t	size;
+	uint16_t	input_p;
+
+	if( huart->Instance == USART2 )
+	{
+		uart_hal_tx.output_p	+= huart->TxXferSize;
+		input_p	= uart_hal_tx.input_p;
+
+		if( uart_hal_tx.output_p >= UART_TX_BUFFER_SIZE )
+		{
+			uart_hal_tx.output_p	-= UART_TX_BUFFER_SIZE;
+		}
+
+		if( input_p != uart_hal_tx.output_p )
+		{
+			if( input_p > uart_hal_tx.output_p )
+			{
+				size = input_p - uart_hal_tx.output_p;
+			}
+			else
+			{
+				size = UART_TX_BUFFER_SIZE - uart_hal_tx.output_p;
+			}
+
+			HAL_UART_Transmit_IT( huart, &uart_hal_tx.buffer[uart_hal_tx.output_p], size );
+		}
+	}
+}
+
+/*********************************************************************/
+/***   RX   **********************************************************/
+/*********************************************************************/
+uint8_t uart_hal_getchar( void )
+{
+	uint16_t	input_p	= uart_hal_rx.input_p;
+
+	if( input_p == uart_hal_rx.output_p )
+	{
+		return 0;
+	}
+
+	uart_hal_rx.rxd	= uart_hal_rx.buffer[uart_hal_rx.output_p++];
+
+	if( uart_hal_rx.output_p >= UART_RX_BUFFER_SIZE )
+	{
+		uart_hal_rx.output_p = 0;
+	}
+
+	return 1;
+}
+
+void HAL_UART_RxCpltCallback( UART_HandleTypeDef *huart )
+{
+	if( huart->Instance == USART2 )
+	{
+		uart_hal_rx.buffer[uart_hal_rx.input_p++] = uart_hal_rx.dummy;
+
+		if( uart_hal_rx.input_p >= UART_RX_BUFFER_SIZE )
+		{
+			uart_hal_rx.input_p	= 0;
+		}
+
+		HAL_UART_Receive_IT( huart, &uart_hal_rx.dummy, 1 );
+	}
+}
+
+void uart_hal_rx_monitor( void )
+{
+	uint8_t	rxd;
+
+	while( uart_hal_getchar() != 0 )
+	{
+		rxd	= uart_hal_rx.rxd;
+		uart_hal_putchar( &rxd, 1 );
+		if( rxd == '\r' )
+		{
+			rxd = '\n';
+			uart_hal_putchar( &rxd, 1 );
+		}
+	}
+}
+
+int __write( int file, unsigned char *p, int len )
+{
+	uart_hal_putchar( p, len );
+
+	return len;
+}
 /* USER CODE END 1 */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

@@ -54,14 +54,37 @@ extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN Private defines */
-
+#define UART_RX_BUFFER_SIZE             1024
+#define UART_TX_BUFFER_SIZE             1024
 /* USER CODE END Private defines */
 
 void MX_USART2_UART_Init(void);
 void MX_USART3_UART_Init(void);
 
 /* USER CODE BEGIN Prototypes */
+typedef struct
+{
+    uint8_t             buffer[UART_TX_BUFFER_SIZE];
+    volatile uint16_t   input_p;
+    volatile uint16_t   output_p;
+} uart_hal_tx_type;
 
+typedef struct
+{
+    uint8_t             buffer[UART_RX_BUFFER_SIZE];
+    uint8_t             dummy;
+    volatile uint8_t    rxd;
+    volatile uint16_t   input_p;
+    volatile uint16_t   output_p;
+} uart_hal_rx_type;
+
+extern uart_hal_tx_type uart_hal_tx;
+extern uart_hal_rx_type uart_hal_rx;
+
+void uart_hal_buffer_init( void );
+void uart_hal_putchar( uint8_t *data, int len );
+uint8_t uart_hal_getchar( void );
+void uart_hal_rx_monitor( void );
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
